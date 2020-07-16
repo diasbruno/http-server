@@ -23,12 +23,13 @@
 (nop j)
 (nop k)
 
-(defun http-server (port
-                    &key
-                      (before-route nil)
-                      (before-responder nil)
-                      (routes nil))
-  nil)
+(defvar *tp* nil)
+(defvar *s* nil)
+
+(defstruct server
+  socket
+  thread
+  threadpool)
 
 (defstruct request
   (method :get)
@@ -58,6 +59,27 @@
             (let ((response (exec request response before-responder)))
               (funcall (cadr route) request response)))))))
 
+(defun http-server (&key
+                      (port 8000)
+                      (before-route nil)
+                      (before-responder nil)
+                      (routes nil))
+  (declare (ignore before-route
+                   before-responder
+                   routes))
+  (let ((server-socket (usocket:socket-listen "127.0.0.1" port
+                                              :reuse-address t)))
+    (let* ((client-socket (usocket:socket-accept server-socket))
+           (stream (usocket:socket-stream client-socket )))
+      (unwind-protect
+           (do ((line (read-line stream nil nil)
+                      (read-line stream nil nil)))
+               ((null line))
+             (format t "~A~%" line))
+        (progn
+          (usocket:socket-close client-socket)
+          (usocket:socket-close server-socket))))))
+
 (defun json-resp (response status data)
   (setf (response-status response) status
         (response-headers response) nil
@@ -65,23 +87,13 @@
   response)
 
 (defvar *routes* nil)
-(setf *routes* `(("/a" ,(lambda (req resp)
+(setf *routes* `(("/" ,(lambda (req resp)
                           (json-resp resp 200 "{}")))
                  ("/b" ,(lambda (req resp) resp))
                  ("/c" ,(lambda (req resp) resp))))
 
-(process
- (make-request :uri "/b")
- ;; => accept socket
- ;; unknown route
- :before-route (list #'f #'g #'h)
- ;; known route dispatched
- :before-responder (list #'i #'j #'k)
- ;; => response
- :routes *routes*)
-
 (setf *server* (http-server
-                8000
+                :port 8000
                 ;; unknown route
                 :before-route (list #'f #'g #'h)
                 ;; known route dispatched
